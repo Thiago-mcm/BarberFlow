@@ -3,6 +3,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from app.ext import db
 from app.models.user import User
+from app.utils.decorators import role_required
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -70,3 +73,71 @@ def me():
     return jsonify(id=user.id, nome=user.nome, email=user.email, role=user.role), 200
 
 
+
+
+@auth_bp.route("/edit/<int:id_usuario>", methods=["PATCH"])
+@role_required("ADMIN")
+def update_user(id_usuario):
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict) or not dados:
+        return jsonify(erro="envie ao menos um campo"), 400
+
+    usuario = db.session.get(User, id_usuario)
+    if not usuario:
+        return jsonify(erro="Usuário não encontrado"), 404
+
+    
+    if "nome" in dados:
+        nome = dados["nome"]
+        if not isinstance(nome, str) or not nome.strip():
+            return jsonify(erro="nome inválido"), 400
+        nome = nome.strip()
+        if len(nome) > 100:
+            return jsonify(erro="nome deve ter no máximo 100 caracteres"), 400
+
+    if "email" in dados:
+        email = dados["email"]
+        if not isinstance(email, str) or not email.strip():
+            return jsonify(erro="email inválido"), 400
+        email = email.strip().lower()
+        if "@" not in email or len(email) > 120:
+            return jsonify(erro="email inválido"), 400
+
+        outro = db.session.scalar(
+            select(User).where(User.email == email).where(User.id != id_usuario)
+        )
+        if outro:
+            return jsonify(erro="email já cadastrado"), 409
+
+    
+    if "nome" in dados:
+        usuario.nome = nome
+    if "email" in dados:
+        usuario.email = email
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify(erro="email já cadastrado"), 409
+
+    return jsonify(usuario.to_dict()), 200
+
+
+@auth_bp.route("/delete/<int:id_usuario>", methods=["DELETE"])
+@role_required("ADMIN")
+def deletar_usuario(id_usuario):
+    usuario = db.session.get(User, id_usuario)
+
+    if not usuario:
+        return jsonify(erro="Usuário não encontrado"), 404
+
+    if id_usuario == int(get_jwt_identity()):
+        return jsonify(erro="Você não pode apagar a própria conta"), 400
+
+    nome = usuario.nome
+
+    db.session.delete(usuario)
+    db.session.commit()
+
+    return jsonify(msg=f"Usuário {nome} deletado"), 200
