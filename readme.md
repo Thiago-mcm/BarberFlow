@@ -1,15 +1,236 @@
-# API de Agendamento
+# BarberFlow
 
-API REST de agendamento com autenticação JWT e níveis de permissão.
+API REST de agendamento para barbearia, com autenticação JWT e níveis de permissão (`CLIENTE`, `BARBEIRO` e `ADMIN`).
+
+> **Status:** em desenvolvimento. Autenticação, permissões e catálogo de serviços estão prontos. Horários dos barbeiros e agendamentos são as próximas etapas (veja o [Roadmap](#roadmap)).
 
 ## Stack
-Python, Flask, SQLAlchemy, MySQL
+
+- Python 3
+- Flask (application factory + Blueprints)
+- Flask-SQLAlchemy / SQLAlchemy 2
+- MySQL (driver PyMySQL)
+- Flask-JWT-Extended
+- python-dotenv
+
+## Funcionalidades
+
+**Prontas**
+
+- Cadastro de usuários com senha em hash
+- Login com JWT (validade de 1 hora)
+- Rotas protegidas e controle de acesso por role
+- Gestão de usuários pelo admin (editar e desativar)
+- CRUD de serviços (corte, barba etc.): leitura para qualquer usuário logado, escrita só para admin
+
+**Planejadas**
+
+- Horários de atendimento dos barbeiros
+- Agendamentos com validação de conflito de horário
+- Cancelamento com regra de prazo e de dono
+
+## Estrutura do projeto
+
+```
+barberflow/
+├── app/
+│   ├── __init__.py        # create_app(): configura, liga extensões, registra Blueprints
+│   ├── ext.py             # db e jwt (criados sem app, ligados no create_app)
+│   ├── models/
+│   │   ├── user.py        # User: nome, email, senha_hash, role, ativo
+│   │   └── service.py     # Service: nome, preco, duracao, ativo
+│   ├── routes/
+│   │   ├── main.py        # rota de verificação
+│   │   ├── auth.py        # cadastro, login, /me e gestão de usuários
+│   │   └── serv.py        # CRUD de serviços
+│   └── utils/
+│       └── decorators.py  # @role_required
+├── .env.example           # modelo das variáveis de ambiente
+├── requirements.txt
+└── run.py                 # sobe a API
+```
 
 ## Como rodar
-1. Clone o repositório
-2. Crie o ambiente virtual e instale: `pip install -r requirements.txt`
-3. Copie `.env.example` para `.env` e preencha os valores
-4. Rode: `python run.py`
+
+**1. Clone e crie o ambiente virtual**
+
+```bash
+git clone https://github.com/Thiago-mcm/barberflow.git
+cd barberflow
+python -m venv .venv
+```
+
+Ative o ambiente (`.venv\Scripts\activate` no Windows, `source .venv/bin/activate` no Linux/Mac) e instale as dependências:
+
+```bash
+pip install -r requirements.txt
+```
+
+**2. Crie o banco no MySQL**
+
+```sql
+CREATE DATABASE barberflow;
+```
+
+**3. Configure as variáveis de ambiente**
+
+Copie o `.env.example` para `.env` e preencha:
+
+```
+DB_URI=mysql+pymysql://usuario:senha@localhost:3306/barberflow
+JWT_SECRET_KEY=cole_aqui_uma_chave_aleatoria
+```
+
+Para gerar a chave:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+> Se a senha do banco tiver caracteres especiais (`@`, `#`, `/`), eles precisam ser codificados na URL.
+
+**4. Rode a API**
+
+```bash
+python run.py
+```
+
+As tabelas são criadas automaticamente na primeira execução. A API sobe em `http://127.0.0.1:5000`.
+
+**5. Crie um administrador**
+
+Todo cadastro pela API nasce como `CLIENTE`. Para promover um usuário, cadastre-o normalmente e rode no MySQL:
+
+```sql
+UPDATE users SET role = 'ADMIN' WHERE email = 'admin@exemplo.com';
+```
+
+Depois **faça login de novo**: a role fica gravada dentro do token, então tokens antigos continuam com a role anterior.
+
+## Autenticação
+
+1. `POST /auth/register` cria o usuário.
+2. `POST /auth/login` devolve um `access_token`.
+3. Nas demais rotas, envie o token no cabeçalho:
+
+```
+Authorization: Bearer <access_token>
+```
+
+Exemplo de cadastro:
+
+```json
+{
+  "nome": "Maria Silva",
+  "email": "maria@exemplo.com",
+  "senha": "senha12345"
+}
+```
+
+Exemplo de serviço (`POST /serv/add`, só admin):
+
+```json
+{
+  "nome": "Corte",
+  "preco": 35.00,
+  "duracao": 30
+}
+```
+
+## Endpoints
+
+| Método | Rota | Acesso | Descrição |
+|---|---|---|---|
+| GET | `/` | público | verifica se a API está no ar |
+| POST | `/auth/register` | público | cria usuário (sempre como `CLIENTE`) |
+| POST | `/auth/login` | público | devolve o `access_token` |
+| GET | `/auth/me` | logado | dados do usuário do token |
+| PATCH | `/auth/edit/<id>` | `ADMIN` | edita `nome` e/ou `email` de um usuário |
+| DELETE | `/auth/delete/<id>` | `ADMIN` | desativa um usuário |
+| GET | `/serv/consult` | logado | lista os serviços ativos |
+| GET | `/serv/consult/<id>` | logado | detalha um serviço ativo |
+| POST | `/serv/add` | `ADMIN` | cria serviço |
+| PATCH | `/serv/edit/<id>` | `ADMIN` | atualiza serviço (parcial) |
+| DELETE | `/serv/delete/<id>` | `ADMIN` | desativa serviço |
 
 ## Regras de negócio
-(a preencher)
+
+### Usuários
+
+- O cadastro **não aceita `role`**: todo usuário nasce `CLIENTE`. Promoções são feitas direto no banco.
+- O email é normalizado (sem espaços, em minúsculas) e é único.
+- A senha precisa ter pelo menos 8 caracteres e é guardada apenas como hash.
+- Usuários não são apagados: `DELETE` apenas os desativa (`ativo = false`), preservando o histórico para os agendamentos.
+- Usuário desativado: não consegue entrar (`403`, depois de confirmar a senha), `/me` e `PATCH` respondem `404`, e o email continua reservado (cadastro com ele dá `409`).
+- O admin não pode desativar a própria conta.
+- A edição altera só `nome` e `email`. Role e senha não podem ser alteradas pela API.
+
+### Serviços
+
+- Qualquer usuário logado lista e consulta. Só o admin cria, edita e desativa.
+- A listagem mostra apenas serviços ativos, em ordem alfabética.
+- `nome`: obrigatório, até 100 caracteres, único.
+- `preco`: número maior que zero e menor que 100000, guardado como decimal com 2 casas.
+- `duracao`: inteiro maior que zero, em minutos. Valores booleanos são rejeitados.
+- A atualização é parcial: só muda os campos enviados, e toda a validação acontece antes de gravar.
+- Serviço desativado se comporta como inexistente (`404`).
+
+### Agendamentos (planejado)
+
+- Não pode haver dois agendamentos sobrepostos para o mesmo barbeiro. Há conflito quando `novo_inicio < fim_existente` e `novo_fim > inicio_existente`.
+- Não é possível agendar no passado.
+- O cancelamento só é permitido até um prazo antes do horário.
+- O cliente cancela apenas os próprios agendamentos. O admin cancela qualquer um.
+
+## Decisões de segurança
+
+- **Hash de senha** com `generate_password_hash`, nunca texto puro. A resposta da API nunca inclui o hash.
+- **Mesma mensagem e `401`** para email inexistente e senha errada, para não revelar quais emails estão cadastrados.
+- **Conta desativada** só é revelada depois de a senha ser confirmada, pelo mesmo motivo.
+- **Role fora do alcance do cliente**: não vem no cadastro nem na edição.
+- **Token com expiração** de 1 hora.
+- **Segredos em variáveis de ambiente**: o `.env` fica fora do Git e o `.env.example` serve de modelo.
+- **Validação de tipo antes de comparação** nos campos numéricos, para entrada inválida resultar em `400` e não em erro interno.
+- **Exclusão lógica** em usuários e serviços, para não quebrar o histórico.
+
+## Códigos de status
+
+| Código | Significado | Exemplo |
+|---|---|---|
+| `200` | sucesso | login, listagens, atualizações |
+| `201` | criado | cadastro, criação de serviço |
+| `400` | dados inválidos | campo faltando, preço negativo, senha curta |
+| `401` | não autenticado | senha errada, token ausente ou expirado |
+| `403` | sem permissão | cliente em rota de admin, conta desativada |
+| `404` | não encontrado | id inexistente ou desativado |
+| `409` | conflito | email ou nome de serviço já cadastrado |
+| `422` | token malformado | token adulterado (padrão da biblioteca JWT) |
+
+## Limitações conhecidas
+
+- **A role vive dentro do token.** Mudar a role de um usuário, ou desativá-lo, só tem efeito completo no próximo login: um token já emitido continua válido até expirar (1 hora). Isso inclui rotas de admin.
+- Emails e nomes de serviço continuam únicos mesmo depois de desativados.
+- As tabelas são criadas com `db.create_all()`, que não altera tabelas já existentes. Ainda não há sistema de migrations.
+- O `run.py` sobe o servidor de desenvolvimento do Flask (modo debug). Não use em produção.
+- Ainda não há testes automatizados nem limite de tentativas no login.
+- Os nomes das rotas (`/consult`, `/add`, `/edit/<id>`, `/delete/<id>`) usam verbos na URL. O padrão REST seria o método HTTP indicar a ação.
+
+## Roadmap
+
+- [x] Estrutura do projeto (application factory e Blueprints)
+- [x] Cadastro e login com JWT
+- [x] Rotas protegidas e permissões por role
+- [x] CRUD de serviços
+- [x] Gestão de usuários (editar e desativar)
+- [ ] Horários de atendimento dos barbeiros
+- [ ] Agendamentos com validação de conflito
+- [ ] Cancelamento com regra de prazo e de dono
+- [ ] Testes de segurança e de conflito de horário
+- [ ] Migrations (Flask-Migrate)
+- [ ] Documentação da API (Swagger/OpenAPI)
+- [ ] Docker e docker-compose
+- [ ] Limite de tentativas no login
+
+## Autor
+
+Thiago Martins Costa Mello. [GitHub](https://github.com/Thiago-mcm)

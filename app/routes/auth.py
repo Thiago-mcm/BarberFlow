@@ -53,7 +53,12 @@ def login():
 
     if not user or not check_password_hash(user.senha_hash, senha):
         return jsonify(erro="email ou senha inválidos"), 401
-
+    
+    
+    if not user.ativo:
+        return jsonify(erro="Usuario desativado"), 403
+    
+    
     token = create_access_token(
         identity=str(user.id),
         additional_claims={"role": user.role},
@@ -67,7 +72,7 @@ def login():
 def me():
     user = db.session.get(User, int(get_jwt_identity()))
 
-    if not user:
+    if not user or not user.ativo:
         return jsonify(erro="usuário não encontrado"), 404
 
     return jsonify(id=user.id, nome=user.nome, email=user.email, role=user.role), 200
@@ -83,7 +88,7 @@ def update_user(id_usuario):
         return jsonify(erro="envie ao menos um campo"), 400
 
     usuario = db.session.get(User, id_usuario)
-    if not usuario:
+    if not usuario or not usuario.ativo:
         return jsonify(erro="Usuário não encontrado"), 404
 
     
@@ -127,17 +132,19 @@ def update_user(id_usuario):
 @auth_bp.route("/delete/<int:id_usuario>", methods=["DELETE"])
 @role_required("ADMIN")
 def deletar_usuario(id_usuario):
-    usuario = db.session.get(User, id_usuario)
-
-    if not usuario:
-        return jsonify(erro="Usuário não encontrado"), 404
-
+    
+    consult = db.session.scalar(select(User).where(User.ativo == True).where(User.id == id_usuario))
+    
+    if not consult:
+        return jsonify(erro="Usuario não encontrado"), 404
+    
     if id_usuario == int(get_jwt_identity()):
         return jsonify(erro="Você não pode apagar a própria conta"), 400
-
-    nome = usuario.nome
-
-    db.session.delete(usuario)
+    
+    consult.ativo = False
     db.session.commit()
+    
+    return jsonify(msg="Usuario inativado", usuario=consult.to_dict()), 200
 
-    return jsonify(msg=f"Usuário {nome} deletado"), 200
+    
+
