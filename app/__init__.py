@@ -6,6 +6,7 @@ from app.ext import db, jwt
 from app.routes.main import main_bp
 from app.routes.auth import auth_bp
 from app.routes.serv import serv_bp
+from app.routes.barber import barber_bp
 
 load_dotenv()
 
@@ -23,9 +24,11 @@ def create_app():
 
     from app.models import user  # noqa: F401
     from app.models import service
+    from app.models import horarios
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(serv_bp, url_prefix="/serv")
+    app.register_blueprint(barber_bp, url_prefix="/barber")
 
     return app
