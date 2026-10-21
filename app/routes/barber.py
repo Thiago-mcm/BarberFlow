@@ -1,11 +1,9 @@
 from flask import Blueprint, request, jsonify
-from werkzeug.security import generate_password_hash, check_password_hash
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from app.ext import db
 from app.models.user import User
 from app.utils.decorators import role_required
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from app.models.horarios import Horario
 
@@ -73,6 +71,18 @@ def add_horario():
         return jsonify(erro="barbeiro não encontrado"), 404
     
     
+    conflito = db.session.scalar(
+    select(Horario)
+    .where(Horario.barbeiro_id == barbeiro_id)
+    .where(Horario.dia_semana == dia_semana)
+    .where(Horario.inicio < fim)
+    .where(Horario.fim > inicio)
+)
+
+    if conflito:
+        return jsonify(erro="Esse horario ja possui reserva"), 409
+
+    
     horario_barber = Horario(
         barbeiro_id=barbeiro_id,
         dia_semana=dia_semana,
@@ -84,7 +94,7 @@ def add_horario():
     db.session.add(horario_barber)
     db.session.commit()
     
-    return jsonify(msg="Horario criado", msg = horario_barber.to_dict())
+    return jsonify(msg="Horario criado", horario=horario_barber.to_dict()), 201
 
 
 
@@ -92,26 +102,38 @@ def add_horario():
 @jwt_required()
 def listar_hr_barber(id_barbeiro):
     
-    consult = db.session.scalars(select(Horario).where(id_barbeiro == Horario.barbeiro_id)).all()
-    
-    return jsonify(horarios= [i.to_dict() for i in consult])
+    barbeiro = db.session.scalar(
+    select(User)
+    .where(User.id == id_barbeiro)
+    .where(User.role == "BARBEIRO")
+    .where(User.ativo.is_(True))
+)
+
+    if not barbeiro:
+        return jsonify(erro="Barbeiro invalido"), 404
+
+    horarios = db.session.scalars(
+        select(Horario)
+        .where(Horario.barbeiro_id == id_barbeiro)
+        .order_by(Horario.dia_semana, Horario.inicio)
+    ).all()
+
+    return jsonify(horarios=[h.to_dict() for h in horarios]), 200
 
 
 @barber_bp.route("/del/<int:id_hr>", methods=["DELETE"])
 @role_required("ADMIN")
 def delete_hr(id_hr):
-    
-    consult = db.session.scalar(select(Horario).where(id_hr == Horario.id))
-    
+
+    consult = db.session.scalar(select(Horario).where(Horario.id == id_hr))
+
     if not consult:
         return jsonify(erro="horario não encontrado"), 404
-    
-    hr = Horario.query.get(id)
-    
-    
-    db.session.delete(hr)
+
+    db.session.delete(consult)
     db.session.commit()
 
+    return jsonify(msg="Horario removido"), 200
     
     
     
