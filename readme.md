@@ -152,7 +152,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 | POST | `/serv/add` | `ADMIN` | cria serviço |
 | PATCH | `/serv/edit/<id>` | `ADMIN` | atualiza serviço (parcial) |
 | DELETE | `/serv/delete/<id>` | `ADMIN` | desativa serviço |
-| POST | `/agendamentos/add` | logado | cria agendamento para o cliente do token |
+| POST | `/agen/add` | logado | cria agendamento para o cliente do token |
 
 ## Regras de negócio
 

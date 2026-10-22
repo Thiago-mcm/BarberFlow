@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.ext import db
 from app.models.user import User
 from sqlalchemy import select
@@ -102,6 +102,86 @@ def add_agen():
     
     return jsonify(msg="Agendamento criado", agendamento=novo_agendamento.to_dict()), 201
 
+
+@agen_bp.route("/list", methods=["GET"])
+@jwt_required()
+def listar_agen():
+    
+    role = get_jwt().get("role")
+    usuario_id = int(get_jwt_identity())
+    
+    
+    if role == "CLIENTE":
+        consult_cl = db.session.scalars(select(Agendamento).where(Agendamento.cliente_id == usuario_id).order_by(Agendamento.inicio)).all()
+        
+        if  not consult_cl:
+            return jsonify(agendamentos="Usuario sem agendamentos"), 200
+        
+        return jsonify(agendamentos=[a.to_dict() for a in consult_cl]), 200
+    
+    elif role == "BARBEIRO":
+        consult_bar = db.session.scalars(select(Agendamento).where(Agendamento.barbeiro_id == usuario_id).order_by(Agendamento.inicio)).all()
+        
+        if not consult_bar:
+            return jsonify(agendamentos="Barbeiro sem agendamentos"), 200
+                
+        return jsonify(agendamentos=[a.to_dict() for a in consult_bar]), 200
+    
+    elif role == "ADMIN":
+        agendamentos = db.session.scalars(select(Agendamento).order_by(Agendamento.inicio)).all()
+        
+        if not agendamentos:
+            return jsonify(agendamentos="Nenhum agendamento no momento"), 200
+        
+        return jsonify(agendamentos=[a.to_dict() for a in agendamentos]), 200
+    
+    
+    else:
+        return jsonify(erro="Usuario com ROLE invalida"), 403 
+    
+    
+    
+    
+@agen_bp.route("/del/<int:id_agen>", methods=["DELETE"])
+@jwt_required()
+def delete_agen(id_agen):
+    role = get_jwt().get("role")
+    usuario_id = int(get_jwt_identity())
+
+    agendamento = db.session.get(Agendamento, id_agen)
+
+    if not agendamento:
+        return jsonify(erro="Agendamento não encontrado"), 404
+
+    if role == "CLIENTE":
+        if agendamento.cliente_id != usuario_id:
+            return jsonify(erro="Você não pode cancelar este agendamento"), 403
+    elif role != "ADMIN":
+        return jsonify(erro="Sem permissão para cancelar"), 403
+
+    if agendamento.status == "CANCELADO":
+        return jsonify(erro="Agendamento já está cancelado"), 409
+
+    if role == "CLIENTE":
+        tempo_restante = agendamento.inicio - datetime.now()
+
+        if tempo_restante < timedelta(hours=2):
+            return jsonify(erro="O cancelamento precisa ser feito com pelo menos 2 horas de antecedência"), 400
+
+    agendamento.status = "CANCELADO"
+    db.session.commit()
+
+    return jsonify(
+        msg="Agendamento cancelado",
+        agendamento=agendamento.to_dict(),
+    ), 200
+    
+        
+        
+        
+    
+    
+    
 
     
     
