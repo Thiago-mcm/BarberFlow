@@ -2,7 +2,7 @@
 
 API REST de agendamento para barbearia, com autenticação JWT e níveis de permissão (`CLIENTE`, `BARBEIRO` e `ADMIN`).
 
-> **Status:** em desenvolvimento. Autenticação, permissões e catálogo de serviços estão prontos. Horários dos barbeiros e agendamentos são as próximas etapas (veja o [Roadmap](#roadmap)).
+> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros e criação de agendamentos estão implementados. Listagem e cancelamento de agendamentos seguem no Roadmap.
 
 ## Stack
 
@@ -22,12 +22,12 @@ API REST de agendamento para barbearia, com autenticação JWT e níveis de perm
 - Rotas protegidas e controle de acesso por role
 - Gestão de usuários pelo admin (editar e desativar)
 - CRUD de serviços (corte, barba etc.): leitura para qualquer usuário logado, escrita só para admin
+- Cadastro de horários de atendimento dos barbeiros pelo admin
+- Criação de agendamentos por usuários autenticados, com validação de expediente e conflito
 
 **Planejadas**
 
-- Horários de atendimento dos barbeiros
-- Agendamentos com validação de conflito de horário
-- Cancelamento com regra de prazo e de dono
+- Listagem e cancelamento de agendamentos
 
 ## Estrutura do projeto
 
@@ -152,6 +152,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 | POST | `/serv/add` | `ADMIN` | cria serviço |
 | PATCH | `/serv/edit/<id>` | `ADMIN` | atualiza serviço (parcial) |
 | DELETE | `/serv/delete/<id>` | `ADMIN` | desativa serviço |
+| POST | `/agendamentos/add` | logado | cria agendamento para o cliente do token |
 
 ## Regras de negócio
 
@@ -175,12 +176,19 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - A atualização é parcial: só muda os campos enviados, e toda a validação acontece antes de gravar.
 - Serviço desativado se comporta como inexistente (`404`).
 
-### Agendamentos (planejado)
+### Horários e criação de agendamentos
 
-- Não pode haver dois agendamentos sobrepostos para o mesmo barbeiro. Há conflito quando `novo_inicio < fim_existente` e `novo_fim > inicio_existente`.
-- Não é possível agendar no passado.
-- O cancelamento só é permitido até um prazo antes do horário.
-- O cliente cancela apenas os próprios agendamentos. O admin cancela qualquer um.
+- Só um `ADMIN` pode cadastrar ou remover horários de atendimento.
+- O expediente usa o dia da semana de `0` (segunda-feira) a `6` (domingo), com horários de início e fim.
+- Qualquer usuário autenticado pode criar um agendamento. O cliente é sempre o usuário identificado pelo token; `cliente_id` enviado no corpo é ignorado.
+- O corpo de criação contém `barbeiro_id`, `servico_id` e `inicio`. O início usa o formato `YYYY-MM-DDTHH:MM`, por exemplo `2026-10-26T10:00`.
+- O barbeiro precisa existir, estar ativo e ter role `BARBEIRO`; o serviço precisa existir e estar ativo.
+- O fim é calculado somando a duração do serviço ao início. O agendamento precisa começar no futuro e terminar no mesmo dia.
+- Um único horário de expediente precisa cobrir o intervalo inteiro. Expedientes encostados não são unidos: com horários 09:00–12:00 e 12:00–14:00, um agendamento que atravesse 12:00 é recusado.
+- Não pode haver sobreposição com outro agendamento `CONFIRMADO` do mesmo barbeiro. A verificação usa `novo_inicio < fim_existente` e `novo_fim > inicio_existente`; portanto, horários que apenas encostam são permitidos. Agendamentos `CANCELADO` não bloqueiam.
+- A criação retorna `201`; dados inválidos retornam `400`, barbeiro ou serviço indisponível retorna `404`, e horário fora do expediente ou ocupado retorna `409`.
+- Duas requisições simultâneas para o mesmo horário ainda podem passar pela validação antes de qualquer uma gravar; essa condição de corrida será tratada futuramente.
+- Listagem e cancelamento ainda não estão implementados. O cancelamento planejado permitirá ao cliente cancelar apenas os próprios agendamentos, e ao admin qualquer um, respeitando o prazo definido para clientes.
 
 ## Decisões de segurança
 
@@ -211,6 +219,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - **A role vive dentro do token.** Mudar a role de um usuário, ou desativá-lo, só tem efeito completo no próximo login: um token já emitido continua válido até expirar (1 hora). Isso inclui rotas de admin.
 - Emails e nomes de serviço continuam únicos mesmo depois de desativados.
 - As tabelas são criadas com `db.create_all()`, que não altera tabelas já existentes. Ainda não há sistema de migrations.
+- A criação de agendamentos usa `DateTime` para início e fim. Se a tabela `agendamentos` já existia com colunas `TIME`, ela precisa ser migrada ou recriada em banco de desenvolvimento; `create_all()` não altera o tipo existente.
 - O `run.py` sobe o servidor de desenvolvimento do Flask (modo debug). Não use em produção.
 - Ainda não há testes automatizados nem limite de tentativas no login.
 - Os nomes das rotas (`/consult`, `/add`, `/edit/<id>`, `/delete/<id>`) usam verbos na URL. O padrão REST seria o método HTTP indicar a ação.
@@ -222,8 +231,8 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - [x] Rotas protegidas e permissões por role
 - [x] CRUD de serviços
 - [x] Gestão de usuários (editar e desativar)
-- [ ] Horários de atendimento dos barbeiros
-- [ ] Agendamentos com validação de conflito
+- [x] Horários de atendimento dos barbeiros
+- [x] Criação de agendamentos com validação de expediente e conflito
 - [ ] Cancelamento com regra de prazo e de dono
 - [ ] Testes de segurança e de conflito de horário
 - [ ] Migrations (Flask-Migrate)

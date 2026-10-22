@@ -13,7 +13,7 @@ barber_bp = Blueprint("barber", __name__)
 
 @barber_bp.route("/consult")
 @jwt_required()
-def show():
+def lista_barbeiros():
     
     barber = db.session.scalars(select(User).where(User.ativo.is_(True)).where(User.role == "BARBEIRO")).all()
     
