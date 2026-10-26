@@ -2,7 +2,7 @@
 
 API REST de agendamento para barbearia, com autenticação JWT e níveis de permissão (`CLIENTE`, `BARBEIRO` e `ADMIN`).
 
-> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros, criação, listagem e cancelamento de agendamentos estão implementados. Testes automatizados e melhorias de segurança seguem no Roadmap.
+> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros, criação, listagem e cancelamento de agendamentos estão implementados. Testes automatizados seguem no Roadmap.
 
 ## Stack
 
@@ -24,13 +24,12 @@ API REST de agendamento para barbearia, com autenticação JWT e níveis de perm
 - CRUD de serviços (corte, barba etc.): leitura para qualquer usuário logado, escrita só para admin
 - Cadastro de horários de atendimento dos barbeiros pelo admin
 - Criação de agendamentos por usuários autenticados, com validação de expediente e conflito
-- Listagem de agendamentos conforme a role do token
+- Listagem de agendamentos conforme a role atual do usuário no banco
 - Cancelamento pelo cliente dono ou pelo admin
 
 **Pendentes**
 
-- Testes automatizados
-- Revalidação do estado atual do usuário em tokens já emitidos
+- Testes automatizados de autenticação, permissões, agendamentos e cancelamentos
 
 ## Estrutura do projeto
 
@@ -112,7 +111,7 @@ Todo cadastro pela API nasce como `CLIENTE`. Para promover um usuário, cadastre
 UPDATE users SET role = 'ADMIN' WHERE email = 'admin@exemplo.com';
 ```
 
-Depois **faça login de novo**: a role fica gravada dentro do token, então tokens antigos continuam com a role anterior.
+A role é consultada no banco a cada requisição protegida. Depois da alteração, o usuário pode continuar usando o token atual; a nova role será aplicada nas próximas requisições.
 
 ## Autenticação
 
@@ -151,7 +150,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 | GET | `/` | público | verifica se a API está no ar |
 | POST | `/auth/register` | público | cria usuário (sempre como `CLIENTE`) |
 | POST | `/auth/login` | público | devolve o `access_token` |
-| GET | `/auth/me` | logado | dados do usuário do token |
+| GET | `/auth/me` | logado | dados do usuário autenticado |
 | PATCH | `/auth/edit/<id>` | `ADMIN` | edita `nome` e/ou `email` de um usuário |
 | DELETE | `/auth/delete/<id>` | `ADMIN` | desativa um usuário |
 | GET | `/serv/consult` | logado | lista os serviços ativos |
@@ -163,7 +162,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 | POST | `/barber/horario` | `ADMIN` | cadastra expediente de barbeiro |
 | GET | `/barber/consult/<id_barbeiro>` | logado | lista horários de um barbeiro |
 | DELETE | `/barber/del/<id_hr>` | `ADMIN` | remove horário de expediente |
-| POST | `/agen/add` | logado | cria agendamento para o cliente do token |
+| POST | `/agen/add` | logado | cria agendamento associado ao usuário autenticado |
 | GET | `/agen/list` | logado | lista agendamentos conforme a role |
 | DELETE | `/agen/del/<id_agen>` | dono ou `ADMIN` | cancela agendamento |
 
@@ -193,7 +192,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 
 - Só um `ADMIN` pode cadastrar ou remover horários de atendimento.
 - O expediente usa o dia da semana de `0` (segunda-feira) a `6` (domingo), com horários de início e fim.
-- Qualquer usuário autenticado pode criar um agendamento. O cliente é sempre o usuário identificado pelo token; `cliente_id` enviado no corpo é ignorado.
+- Qualquer usuário autenticado (`CLIENTE`, `BARBEIRO` ou `ADMIN`) pode criar um agendamento. O campo `cliente_id` é definido pelo usuário identificado no token; esse campo não é aceito do corpo da requisição.
 - O corpo de criação contém `barbeiro_id`, `servico_id` e `inicio`. O início usa o formato `YYYY-MM-DDTHH:MM`, por exemplo `2026-10-26T10:00`.
 - O barbeiro precisa existir, estar ativo e ter role `BARBEIRO`; o serviço precisa existir e estar ativo.
 - O fim é calculado somando a duração do serviço ao início. O agendamento precisa começar no futuro e terminar no mesmo dia.
@@ -201,8 +200,8 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - Não pode haver sobreposição com outro agendamento `CONFIRMADO` do mesmo barbeiro. A verificação usa `novo_inicio < fim_existente` e `novo_fim > inicio_existente`; portanto, horários que apenas encostam são permitidos. Agendamentos `CANCELADO` não bloqueiam.
 - A criação retorna `201`; dados inválidos retornam `400`, barbeiro ou serviço indisponível retorna `404`, e horário fora do expediente ou ocupado retorna `409`.
 - Duas requisições simultâneas para o mesmo horário ainda podem passar pela validação antes de qualquer uma gravar; essa condição de corrida será tratada futuramente.
-- A listagem inclui agendamentos de todos os status e ordena por início: `CLIENTE` vê os próprios, `BARBEIRO` vê os seus e `ADMIN` vê todos.
-- Sem resultados, a listagem responde `200` com uma mensagem no campo `agendamentos` (o campo contém uma mensagem textual nesse caso e uma lista quando há resultados).
+- A listagem mostra somente agendamentos `CONFIRMADO`, em ordem de início: `CLIENTE` vê os próprios, `BARBEIRO` vê os seus e `ADMIN` vê todos os confirmados.
+- Sem resultados, a listagem responde `200` com `"agendamentos": []`.
 - O cancelamento não apaga a linha: altera o status para `CANCELADO`. O dono ou `ADMIN` pode cancelar; outro cliente recebe `403`, ID inexistente recebe `404` e agendamento já cancelado recebe `409`.
 - O cliente precisa cancelar com pelo menos 2 horas de antecedência. O admin pode cancelar sem prazo. Tentativa do cliente fora do prazo retorna `400`.
 
@@ -222,7 +221,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 | Código | Significado | Exemplo |
 |---|---|---|
 | `200` | sucesso | login, listagens, atualizações e cancelamento |
-| `201` | criado | cadastro, criação de serviço |
+| `201` | criado | cadastro, criação de serviço e agendamento |
 | `400` | dados inválidos | campo faltando, preço negativo, senha curta |
 | `401` | não autenticado | senha errada, token ausente ou expirado |
 | `403` | sem permissão | cliente em rota de admin ou tentando cancelar agendamento alheio |
@@ -232,7 +231,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 
 ## Limitações conhecidas
 
-- **A role vive dentro do token.** Mudar a role de um usuário, ou desativá-lo, só tem efeito completo no próximo login: um token já emitido continua válido até expirar (1 hora). Isso inclui rotas de admin.
+- **Role e estado ativo são consultados no banco.** Alterar a role ou desativar a conta afeta as próximas requisições protegidas, mesmo com um token já emitido. O token continua sujeito à expiração de 1 hora.
 - Emails e nomes de serviço continuam únicos mesmo depois de desativados.
 - As tabelas são criadas com `db.create_all()`, que não altera tabelas já existentes. Ainda não há sistema de migrations.
 - A criação de agendamentos usa `DateTime` para início e fim. Se a tabela `agendamentos` já existia com colunas `TIME`, ela precisa ser migrada ou recriada em banco de desenvolvimento; `create_all()` não altera o tipo existente.
@@ -259,5 +258,8 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 ## Autor
 
 Thiago Martins Costa Mello. [GitHub](https://github.com/Thiago-mcm)
+
+
+
 
 
