@@ -2,7 +2,7 @@
 
 API REST de agendamento para barbearia, com autenticação JWT e níveis de permissão (`CLIENTE`, `BARBEIRO` e `ADMIN`).
 
-> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros e criação de agendamentos estão implementados. Listagem e cancelamento de agendamentos seguem no Roadmap.
+> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros, criação, listagem e cancelamento de agendamentos estão implementados. Testes automatizados e melhorias de segurança seguem no Roadmap.
 
 ## Stack
 
@@ -24,10 +24,13 @@ API REST de agendamento para barbearia, com autenticação JWT e níveis de perm
 - CRUD de serviços (corte, barba etc.): leitura para qualquer usuário logado, escrita só para admin
 - Cadastro de horários de atendimento dos barbeiros pelo admin
 - Criação de agendamentos por usuários autenticados, com validação de expediente e conflito
+- Listagem de agendamentos conforme a role do token
+- Cancelamento pelo cliente dono ou pelo admin
 
-**Planejadas**
+**Pendentes**
 
-- Listagem e cancelamento de agendamentos
+- Testes automatizados
+- Revalidação do estado atual do usuário em tokens já emitidos
 
 ## Estrutura do projeto
 
@@ -37,12 +40,16 @@ barberflow/
 │   ├── __init__.py        # create_app(): configura, liga extensões, registra Blueprints
 │   ├── ext.py             # db e jwt (criados sem app, ligados no create_app)
 │   ├── models/
-│   │   ├── user.py        # User: nome, email, senha_hash, role, ativo
-│   │   └── service.py     # Service: nome, preco, duracao, ativo
+│   │   ├── user.py        # usuários, role e estado ativo
+│   │   ├── service.py     # serviços e duração
+│   │   ├── horarios.py    # expediente semanal do barbeiro
+│   │   └── agendamento.py # cliente, barbeiro, serviço e período
 │   ├── routes/
 │   │   ├── main.py        # rota de verificação
 │   │   ├── auth.py        # cadastro, login, /me e gestão de usuários
-│   │   └── serv.py        # CRUD de serviços
+│   │   ├── serv.py        # CRUD de serviços
+│   │   ├── barber.py      # consulta de barbeiros e horários
+│   │   └── agen.py        # criação, listagem e cancelamento
 │   └── utils/
 │       └── decorators.py  # @role_required
 ├── .env.example           # modelo das variáveis de ambiente
@@ -152,7 +159,13 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 | POST | `/serv/add` | `ADMIN` | cria serviço |
 | PATCH | `/serv/edit/<id>` | `ADMIN` | atualiza serviço (parcial) |
 | DELETE | `/serv/delete/<id>` | `ADMIN` | desativa serviço |
+| GET | `/barber/consult` | logado | lista barbeiros ativos |
+| POST | `/barber/horario` | `ADMIN` | cadastra expediente de barbeiro |
+| GET | `/barber/consult/<id_barbeiro>` | logado | lista horários de um barbeiro |
+| DELETE | `/barber/del/<id_hr>` | `ADMIN` | remove horário de expediente |
 | POST | `/agen/add` | logado | cria agendamento para o cliente do token |
+| GET | `/agen/list` | logado | lista agendamentos conforme a role |
+| DELETE | `/agen/del/<id_agen>` | dono ou `ADMIN` | cancela agendamento |
 
 ## Regras de negócio
 
@@ -188,7 +201,10 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - Não pode haver sobreposição com outro agendamento `CONFIRMADO` do mesmo barbeiro. A verificação usa `novo_inicio < fim_existente` e `novo_fim > inicio_existente`; portanto, horários que apenas encostam são permitidos. Agendamentos `CANCELADO` não bloqueiam.
 - A criação retorna `201`; dados inválidos retornam `400`, barbeiro ou serviço indisponível retorna `404`, e horário fora do expediente ou ocupado retorna `409`.
 - Duas requisições simultâneas para o mesmo horário ainda podem passar pela validação antes de qualquer uma gravar; essa condição de corrida será tratada futuramente.
-- Listagem e cancelamento ainda não estão implementados. O cancelamento planejado permitirá ao cliente cancelar apenas os próprios agendamentos, e ao admin qualquer um, respeitando o prazo definido para clientes.
+- A listagem inclui agendamentos de todos os status e ordena por início: `CLIENTE` vê os próprios, `BARBEIRO` vê os seus e `ADMIN` vê todos.
+- Sem resultados, a listagem responde `200` com uma mensagem no campo `agendamentos` (o campo contém uma mensagem textual nesse caso e uma lista quando há resultados).
+- O cancelamento não apaga a linha: altera o status para `CANCELADO`. O dono ou `ADMIN` pode cancelar; outro cliente recebe `403`, ID inexistente recebe `404` e agendamento já cancelado recebe `409`.
+- O cliente precisa cancelar com pelo menos 2 horas de antecedência. O admin pode cancelar sem prazo. Tentativa do cliente fora do prazo retorna `400`.
 
 ## Decisões de segurança
 
@@ -205,13 +221,13 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 
 | Código | Significado | Exemplo |
 |---|---|---|
-| `200` | sucesso | login, listagens, atualizações |
+| `200` | sucesso | login, listagens, atualizações e cancelamento |
 | `201` | criado | cadastro, criação de serviço |
 | `400` | dados inválidos | campo faltando, preço negativo, senha curta |
 | `401` | não autenticado | senha errada, token ausente ou expirado |
-| `403` | sem permissão | cliente em rota de admin, conta desativada |
+| `403` | sem permissão | cliente em rota de admin ou tentando cancelar agendamento alheio |
 | `404` | não encontrado | id inexistente ou desativado |
-| `409` | conflito | email ou nome de serviço já cadastrado |
+| `409` | conflito | email/nome já cadastrado, horário ocupado ou agendamento já cancelado |
 | `422` | token malformado | token adulterado (padrão da biblioteca JWT) |
 
 ## Limitações conhecidas
@@ -233,7 +249,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - [x] Gestão de usuários (editar e desativar)
 - [x] Horários de atendimento dos barbeiros
 - [x] Criação de agendamentos com validação de expediente e conflito
-- [ ] Cancelamento com regra de prazo e de dono
+- [x] Listagem e cancelamento com regra de prazo e de dono
 - [ ] Testes de segurança e de conflito de horário
 - [ ] Migrations (Flask-Migrate)
 - [ ] Documentação da API (Swagger/OpenAPI)
@@ -243,3 +259,5 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 ## Autor
 
 Thiago Martins Costa Mello. [GitHub](https://github.com/Thiago-mcm)
+
+

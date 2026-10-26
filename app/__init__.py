@@ -1,7 +1,7 @@
 import os
 from datetime import timedelta
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, jsonify
 from app.ext import db, jwt
 from app.routes.main import main_bp
 from app.routes.auth import auth_bp
@@ -30,5 +30,25 @@ def create_app():
     app.register_blueprint(serv_bp, url_prefix="/serv")
     app.register_blueprint(barber_bp, url_prefix="/barber")
     app. register_blueprint(agen_bp, url_prefix="/agen")
+    
+    from app.models.user import User
+    
+    @jwt.user_lookup_loader
+    def carregar_user(__jwt_header, jwt_data):
+        try:
+            usuario_id = int(jwt_data["sub"])
+        except(KeyError, TypeError, ValueError):
+            return None
+        
+        usuario = db.session.get(User, usuario_id)
+        
+        if usuario is None or not usuario.ativo:
+            return None
+        
+        return usuario
+    
+    @jwt.user_lookup_error_loader
+    def erro_user_token(__jwt_header, __jwt_data):
+        return jsonify(erro="Usuário inativo ou não encontrado"), 401
 
     return app

@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_current_user
 from app.ext import db
 from app.models.user import User
 from sqlalchemy import select
@@ -107,35 +107,26 @@ def add_agen():
 @jwt_required()
 def listar_agen():
     
-    role = get_jwt().get("role")
-    usuario_id = int(get_jwt_identity())
+    usuario = get_current_user()
+    role = usuario.role
+    usuario_id = usuario.id
     
     
     if role == "CLIENTE":
-        consult_cl = db.session.scalars(select(Agendamento).where(Agendamento.cliente_id == usuario_id).order_by(Agendamento.inicio)).all()
-        
-        if  not consult_cl:
-            return jsonify(agendamentos="Usuario sem agendamentos"), 200
+        consult_cl = db.session.scalars(select(Agendamento).where(Agendamento.cliente_id == usuario_id).where(Agendamento.status == "CONFIRMADO").order_by(Agendamento.inicio)).all()
         
         return jsonify(agendamentos=[a.to_dict() for a in consult_cl]), 200
     
     elif role == "BARBEIRO":
-        consult_bar = db.session.scalars(select(Agendamento).where(Agendamento.barbeiro_id == usuario_id).order_by(Agendamento.inicio)).all()
-        
-        if not consult_bar:
-            return jsonify(agendamentos="Barbeiro sem agendamentos"), 200
-                
+        consult_bar = db.session.scalars(select(Agendamento).where(Agendamento.barbeiro_id == usuario_id).where(Agendamento.status == "CONFIRMADO").order_by(Agendamento.inicio)).all()
+     
         return jsonify(agendamentos=[a.to_dict() for a in consult_bar]), 200
     
     elif role == "ADMIN":
-        agendamentos = db.session.scalars(select(Agendamento).order_by(Agendamento.inicio)).all()
-        
-        if not agendamentos:
-            return jsonify(agendamentos="Nenhum agendamento no momento"), 200
-        
+        agendamentos = db.session.scalars(select(Agendamento).where(Agendamento.status == "CONFIRMADO").order_by(Agendamento.inicio)).all()
+
         return jsonify(agendamentos=[a.to_dict() for a in agendamentos]), 200
-    
-    
+
     else:
         return jsonify(erro="Usuario com ROLE invalida"), 403 
     
@@ -145,8 +136,9 @@ def listar_agen():
 @agen_bp.route("/del/<int:id_agen>", methods=["DELETE"])
 @jwt_required()
 def delete_agen(id_agen):
-    role = get_jwt().get("role")
-    usuario_id = int(get_jwt_identity())
+    usuario = get_current_user()
+    role = usuario.role
+    usuario_id = usuario.id
 
     agendamento = db.session.get(Agendamento, id_agen)
 
