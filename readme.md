@@ -2,7 +2,7 @@
 
 API REST de agendamento para barbearia, com autenticação JWT e níveis de permissão (`CLIENTE`, `BARBEIRO` e `ADMIN`).
 
-> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros, criação, listagem e cancelamento de agendamentos estão implementados. Testes automatizados seguem no Roadmap.
+> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros, criação, listagem e cancelamento de agendamentos estão implementados. A suíte automatizada contém 49 testes aprovados.
 
 ## Stack
 
@@ -27,9 +27,13 @@ API REST de agendamento para barbearia, com autenticação JWT e níveis de perm
 - Listagem de agendamentos conforme a role atual do usuário no banco
 - Cancelamento pelo cliente dono ou pelo admin
 
-**Pendentes**
+**Melhorias planejadas**
 
-- Testes automatizados de autenticação, permissões, agendamentos e cancelamentos
+- Migrations (Flask-Migrate)
+- Documentação da API (Swagger/OpenAPI)
+- Docker e docker-compose
+- Limite de tentativas no login
+
 
 ## Estrutura do projeto
 
@@ -51,8 +55,15 @@ barberflow/
 │   │   └── agen.py        # criação, listagem e cancelamento
 │   └── utils/
 │       └── decorators.py  # @role_required
+├── tests/
+│   ├── conftest.py        # app, SQLite em memória e cliente de teste
+│   ├── test_auth.py
+│   ├── test_serv.py
+│   ├── test_barber.py
+│   └── test_agen.py
 ├── .env.example           # modelo das variáveis de ambiente
 ├── requirements.txt
+├── requirements-dev.txt   # dependências de desenvolvimento e teste
 └── run.py                 # sobe a API
 ```
 
@@ -112,6 +123,17 @@ UPDATE users SET role = 'ADMIN' WHERE email = 'admin@exemplo.com';
 ```
 
 A role é consultada no banco a cada requisição protegida. Depois da alteração, o usuário pode continuar usando o token atual; a nova role será aplicada nas próximas requisições.
+
+## Testes automatizados
+
+Os testes usam SQLite em memória e o cliente de teste do Flask. O servidor não precisa estar rodando e o banco MySQL de desenvolvimento não é usado.
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+A suíte atual tem 49 testes aprovados, cobrindo autenticação, permissões, serviços, horários dos barbeiros e agendamentos.
 
 ## Autenticação
 
@@ -174,7 +196,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - O email é normalizado (sem espaços, em minúsculas) e é único.
 - A senha precisa ter pelo menos 8 caracteres e é guardada apenas como hash.
 - Usuários não são apagados: `DELETE` apenas os desativa (`ativo = false`), preservando o histórico para os agendamentos.
-- Usuário desativado: não consegue entrar (`403`, depois de confirmar a senha), `/me` e `PATCH` respondem `404`, e o email continua reservado (cadastro com ele dá `409`).
+- Usuário desativado: não consegue entrar (`403`, depois de confirmar a senha); requisições protegidas com um token já emitido respondem `401`. O email continua reservado (cadastro com ele dá `409`).
 - O admin não pode desativar a própria conta.
 - A edição altera só `nome` e `email`. Role e senha não podem ser alteradas pela API.
 
@@ -236,7 +258,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - As tabelas são criadas com `db.create_all()`, que não altera tabelas já existentes. Ainda não há sistema de migrations.
 - A criação de agendamentos usa `DateTime` para início e fim. Se a tabela `agendamentos` já existia com colunas `TIME`, ela precisa ser migrada ou recriada em banco de desenvolvimento; `create_all()` não altera o tipo existente.
 - O `run.py` sobe o servidor de desenvolvimento do Flask (modo debug). Não use em produção.
-- Ainda não há testes automatizados nem limite de tentativas no login.
+- Ainda não há limite de tentativas no login.
 - Os nomes das rotas (`/consult`, `/add`, `/edit/<id>`, `/delete/<id>`) usam verbos na URL. O padrão REST seria o método HTTP indicar a ação.
 
 ## Roadmap
@@ -249,7 +271,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 - [x] Horários de atendimento dos barbeiros
 - [x] Criação de agendamentos com validação de expediente e conflito
 - [x] Listagem e cancelamento com regra de prazo e de dono
-- [ ] Testes de segurança e de conflito de horário
+- [x] Testes automatizados de autenticação, permissões, serviços, horários e agendamentos
 - [ ] Migrations (Flask-Migrate)
 - [ ] Documentação da API (Swagger/OpenAPI)
 - [ ] Docker e docker-compose
@@ -258,6 +280,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 ## Autor
 
 Thiago Martins Costa Mello. [GitHub](https://github.com/Thiago-mcm)
+
 
 
 
