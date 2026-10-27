@@ -13,7 +13,10 @@ auth_bp = Blueprint("auth", __name__)
 
 @auth_bp.route("/register", methods=["POST"])
 def register():
-    dados = request.get_json(silent=True) or {}
+    dados = request.get_json(silent=True)
+
+    if not isinstance(dados, dict):
+        return jsonify(erro="O corpo precisa ser um objeto JSON"), 400
 
     nome = (dados.get("nome") or "").strip()
     email = (dados.get("email") or "").strip().lower()
@@ -41,8 +44,11 @@ def register():
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
-    dados = request.get_json(silent=True) or {}
-
+    dados = request.get_json(silent=True)
+    
+    if not isinstance(dados, dict):
+        return jsonify(erro="O corpo precisa ser um objeto JSON"), 400
+    
     email = (dados.get("email") or "").strip().lower()
     senha = dados.get("senha") or ""
 

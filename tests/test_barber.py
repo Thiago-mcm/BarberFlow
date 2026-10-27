@@ -234,3 +234,18 @@ def test_consultar_horarios_de_usuario_que_nao_e_barbeiro_retorna_404(
     )
 
     assert resposta.status_code == 404
+
+# Teste 11 — ADMIN recebe 400 quando envia JSON que não é um objeto.
+def test_admin_nao_cadastra_horario_com_json_que_nao_e_objeto_retorna_400(
+    client, app
+):
+    admin_id = criar_usuario(app, "admin-horario-json@teste.com", role="ADMIN")
+    token = criar_token(app, admin_id)
+
+    resposta = client.post(
+        "/barber/horario",
+        headers={"Authorization": f"Bearer {token}"},
+        json=["valor"],
+    )
+
+    assert resposta.status_code == 400

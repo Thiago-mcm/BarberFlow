@@ -216,3 +216,16 @@ def test_admin_desativa_servico(client, app):
 
     assert resposta.status_code == 200
     assert resposta.get_json()["servico"]["ativo"] is False
+
+# Teste 14 — ADMIN recebe 400 quando envia JSON que não é um objeto.
+def test_admin_nao_cria_servico_com_json_que_nao_e_objeto_retorna_400(client, app):
+    admin_id = criar_usuario(app, "admin-json-invalido@teste.com", role="ADMIN")
+    token = criar_token(app, admin_id)
+
+    resposta = client.post(
+        "/serv/add",
+        headers={"Authorization": f"Bearer {token}"},
+        json=["valor"],
+    )
+
+    assert resposta.status_code == 400

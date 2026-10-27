@@ -207,3 +207,15 @@ def test_me_com_token_retorna_usuario(client):
 
     assert resposta.status_code == 200
     assert resposta.get_json()["email"] == "me@teste.com"
+# Teste 13 — cadastro rejeita JSON que não seja um objeto.
+def test_cadastro_com_json_que_nao_e_objeto_retorna_400(client):
+    resposta = client.post("/auth/register", json=["valor"])
+
+    assert resposta.status_code == 400
+
+
+# Teste 14 — login rejeita JSON que não seja um objeto.
+def test_login_com_json_que_nao_e_objeto_retorna_400(client):
+    resposta = client.post("/auth/login", json=["valor"])
+
+    assert resposta.status_code == 400

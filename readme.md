@@ -2,7 +2,7 @@
 
 API REST de agendamento para barbearia, com autenticação JWT e níveis de permissão (`CLIENTE`, `BARBEIRO` e `ADMIN`).
 
-> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros, criação, listagem e cancelamento de agendamentos estão implementados. A suíte automatizada contém 49 testes aprovados.
+> **Status:** em desenvolvimento. Autenticação, permissões, catálogo de serviços, horários dos barbeiros, criação, listagem e cancelamento de agendamentos estão implementados. A suíte automatizada contém 53 testes aprovados.
 
 ## Stack
 
@@ -133,7 +133,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-A suíte atual tem 49 testes aprovados, cobrindo autenticação, permissões, serviços, horários dos barbeiros e agendamentos.
+A suíte atual tem 53 testes aprovados, cobrindo autenticação, permissões, serviços, horários dos barbeiros e agendamentos.
 
 ## Autenticação
 
@@ -280,6 +280,7 @@ Exemplo de serviço (`POST /serv/add`, só admin):
 ## Autor
 
 Thiago Martins Costa Mello. [GitHub](https://github.com/Thiago-mcm)
+
 
 
 

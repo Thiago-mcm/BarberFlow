@@ -42,7 +42,10 @@ def listar_servico(servico_id):
 @serv_bp.route("/add", methods=["POST"])
 @role_required("ADMIN")
 def create():
-    dados = request.get_json(silent=True) or {}
+    dados = request.get_json(silent=True)
+    
+    if not isinstance(dados, dict):
+        return jsonify(erro="O corpo precisa ser um objeto JSON"), 400
 
     nome = dados.get("nome")
     preco = dados.get("preco") or ""

@@ -25,7 +25,10 @@ def lista_barbeiros():
 @barber_bp.route("/horario", methods=["POST"])
 @role_required("ADMIN")
 def add_horario():
-    dados = request.get_json(silent=True) or {}
+    dados = request.get_json(silent=True)
+    
+    if not isinstance(dados, dict):
+        return jsonify(erro="O corpo precisa ser um objeto JSON"), 400
     
     barbeiro_id = dados.get("barbeiro_id")
     dia_semana = dados.get("dia_semana")
