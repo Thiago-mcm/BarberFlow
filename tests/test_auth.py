@@ -219,3 +219,167 @@ def test_login_com_json_que_nao_e_objeto_retorna_400(client):
     resposta = client.post("/auth/login", json=["valor"])
 
     assert resposta.status_code == 400
+    
+# Teste 15 — cliente não pode listar usuários.
+def test_cliente_nao_lista_usuarios(client, app):
+    with app.app_context():
+        cliente = User(
+            nome="Cliente de teste",
+            email="cliente-lista@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="CLIENTE",
+        )
+        db.session.add(cliente)
+        db.session.commit()
+
+        token = create_access_token(identity=str(cliente.id))
+
+    resposta = client.get(
+        "/auth/users",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resposta.status_code == 403
+
+
+# Teste 16 — admin lista usuários e pode filtrar por role.
+def test_admin_lista_usuarios_e_filtra_por_role(client, app):
+    with app.app_context():
+        admin = User(
+            nome="Admin de teste",
+            email="admin-lista@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="ADMIN",
+        )
+        barbeiro = User(
+            nome="Barbeiro de teste",
+            email="barbeiro-lista@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="BARBEIRO",
+        )
+        db.session.add_all([admin, barbeiro])
+        db.session.commit()
+
+        token = create_access_token(identity=str(admin.id))
+        barbeiro_id = barbeiro.id
+
+    todos = client.get(
+        "/auth/users",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    so_barbeiros = client.get(
+        "/auth/users?role=BARBEIRO",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert todos.status_code == 200
+    assert len(todos.get_json()) == 2
+    assert [u["id"] for u in so_barbeiros.get_json()] == [barbeiro_id]
+    
+# Teste 17 — admin promove cliente a barbeiro.
+def test_admin_promove_cliente_a_barbeiro(client, app):
+    with app.app_context():
+        admin = User(
+            nome="Admin de teste",
+            email="admin-role@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="ADMIN",
+        )
+        cliente = User(
+            nome="Cliente de teste",
+            email="cliente-role@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="CLIENTE",
+        )
+        db.session.add_all([admin, cliente])
+        db.session.commit()
+
+        token = create_access_token(identity=str(admin.id))
+        cliente_id = cliente.id
+
+    resposta = client.patch(
+        f"/auth/role/{cliente_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "BARBEIRO"},
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()["usuario"]["role"] == "BARBEIRO"
+
+
+# Teste 18 — cliente não altera role, nem a própria.
+def test_cliente_nao_altera_role(client, app):
+    with app.app_context():
+        cliente = User(
+            nome="Cliente de teste",
+            email="cliente-quer-admin@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="CLIENTE",
+        )
+        db.session.add(cliente)
+        db.session.commit()
+
+        token = create_access_token(identity=str(cliente.id))
+        cliente_id = cliente.id
+
+    resposta = client.patch(
+        f"/auth/role/{cliente_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "ADMIN"},
+    )
+
+    assert resposta.status_code == 403
+
+
+# Teste 19 — role inválida retorna 400.
+def test_role_invalida_retorna_400(client, app):
+    with app.app_context():
+        admin = User(
+            nome="Admin de teste",
+            email="admin-role-invalida@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="ADMIN",
+        )
+        alvo = User(
+            nome="Alvo de teste",
+            email="alvo-role@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="CLIENTE",
+        )
+        db.session.add_all([admin, alvo])
+        db.session.commit()
+
+        token = create_access_token(identity=str(admin.id))
+        alvo_id = alvo.id
+
+    resposta = client.patch(
+        f"/auth/role/{alvo_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "DONO"},
+    )
+
+    assert resposta.status_code == 400
+
+
+# Teste 20 — admin não altera a própria role.
+def test_admin_nao_altera_a_propria_role(client, app):
+    with app.app_context():
+        admin = User(
+            nome="Admin de teste",
+            email="admin-propria-role@teste.com",
+            senha_hash="hash-apenas-para-teste",
+            role="ADMIN",
+        )
+        db.session.add(admin)
+        db.session.commit()
+
+        token = create_access_token(identity=str(admin.id))
+        admin_id = admin.id
+
+    resposta = client.patch(
+        f"/auth/role/{admin_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "CLIENTE"},
+    )
+
+    assert resposta.status_code == 400

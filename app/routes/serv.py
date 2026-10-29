@@ -70,7 +70,7 @@ def create():
     if not preco.is_finite() or preco <= 0 or preco >= 100000:
         return jsonify(erro="preco deve ser maior que zero e menor que 100000"), 400
 
-    if Service.query.filter_by(nome=nome).first():
+    if db.session.scalar(select(Service).where(Service.nome == nome)):
         return jsonify(erro="serviço já cadastrado"), 409
 
     novo = Service(nome=nome, preco=preco, duracao=duracao)

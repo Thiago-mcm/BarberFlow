@@ -473,3 +473,279 @@ def test_cancelar_agendamento_ja_cancelado_retorna_409(client, app):
     )
 
     assert resposta.status_code == 409
+    
+# Teste 15 — a listagem traz os nomes de cliente, barbeiro e serviço.
+def test_listagem_traz_nomes(client, app):
+    cliente_id = criar_usuario(app, "cliente-nomes@teste.com")
+    barbeiro_id = criar_usuario(
+        app,
+        "barbeiro-nomes@teste.com",
+        role="BARBEIRO",
+    )
+    servico_id = criar_servico(app)
+    criar_agendamento(app, cliente_id, barbeiro_id, servico_id, data_futura())
+    token = criar_token(app, cliente_id)
+
+    resposta = client.get(
+        "/agen/list",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    item = resposta.get_json()["agendamentos"][0]
+
+    assert resposta.status_code == 200
+    assert item["cliente"]["nome"] == "Usuário de teste"
+    assert item["barbeiro"]["id"] == barbeiro_id
+    assert item["servico"]["nome"] == "Serviço de teste"
+    assert item["servico"]["duracao"] == 30
+    assert item["servico_id"] == servico_id
+
+# Teste 16 — sem filtro só confirmados; com status, o histórico aparece.
+def test_listagem_filtra_por_status(client, app):
+    cliente_id = criar_usuario(app, "cliente-historico@teste.com")
+    barbeiro_id = criar_usuario(
+        app,
+        "barbeiro-historico@teste.com",
+        role="BARBEIRO",
+    )
+    servico_id = criar_servico(app)
+    base = data_futura()
+    confirmado_id = criar_agendamento(
+        app, cliente_id, barbeiro_id, servico_id, base
+    )
+    cancelado_id = criar_agendamento(
+        app, cliente_id, barbeiro_id, servico_id,
+        base + timedelta(hours=1), status="CANCELADO",
+    )
+    concluido_id = criar_agendamento(
+        app, cliente_id, barbeiro_id, servico_id,
+        base - timedelta(days=30), status="CONCLUIDO",
+    )
+    token = criar_token(app, cliente_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def ids(url):
+        resposta = client.get(url, headers=headers)
+        assert resposta.status_code == 200
+        return [i["id"] for i in resposta.get_json()["agendamentos"]]
+
+    assert ids("/agen/list") == [confirmado_id]
+    assert ids("/agen/list?status=CANCELADO") == [cancelado_id]
+    assert ids("/agen/list?status=todos") == [concluido_id, confirmado_id, cancelado_id]
+
+    invalido = client.get("/agen/list?status=XYZ", headers=headers)
+    assert invalido.status_code == 400
+    
+# Teste 17 — barbeiro conclui atendimento que já começou.
+def test_barbeiro_conclui_atendimento(client, app):
+    cliente_id = criar_usuario(app, "cliente-conclui@teste.com")
+    barbeiro_id = criar_usuario(
+        app,
+        "barbeiro-conclui@teste.com",
+        role="BARBEIRO",
+    )
+    servico_id = criar_servico(app)
+    inicio = datetime.now().replace(second=0, microsecond=0) - timedelta(hours=1)
+    agendamento_id = criar_agendamento(
+        app, cliente_id, barbeiro_id, servico_id, inicio
+    )
+    token = criar_token(app, barbeiro_id)
+
+    resposta = client.patch(
+        f"/agen/concluir/{agendamento_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()["agendamento"]["status"] == "CONCLUIDO"
+
+
+# Teste 18 — não conclui agendamento futuro.
+def test_nao_conclui_agendamento_futuro(client, app):
+    cliente_id = criar_usuario(app, "cliente-conclui-futuro@teste.com")
+    barbeiro_id = criar_usuario(
+        app,
+        "barbeiro-conclui-futuro@teste.com",
+        role="BARBEIRO",
+    )
+    servico_id = criar_servico(app)
+    inicio = datetime.now().replace(second=0, microsecond=0) + timedelta(hours=3)
+    agendamento_id = criar_agendamento(
+        app, cliente_id, barbeiro_id, servico_id, inicio
+    )
+    token = criar_token(app, barbeiro_id)
+
+    resposta = client.patch(
+        f"/agen/concluir/{agendamento_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resposta.status_code == 400
+
+
+# Teste 19 — cliente e barbeiro de outro agendamento não concluem.
+def test_cliente_e_barbeiro_alheio_nao_concluem(client, app):
+    cliente_id = criar_usuario(app, "cliente-conclui-nao@teste.com")
+    dono_id = criar_usuario(
+        app,
+        "barbeiro-dono-conclui@teste.com",
+        role="BARBEIRO",
+    )
+    outro_id = criar_usuario(
+        app,
+        "barbeiro-outro-conclui@teste.com",
+        role="BARBEIRO",
+    )
+    servico_id = criar_servico(app)
+    inicio = datetime.now().replace(second=0, microsecond=0) - timedelta(hours=1)
+    agendamento_id = criar_agendamento(
+        app, cliente_id, dono_id, servico_id, inicio
+    )
+
+    resposta_cliente = client.patch(
+        f"/agen/concluir/{agendamento_id}",
+        headers={"Authorization": f"Bearer {criar_token(app, cliente_id)}"},
+    )
+    resposta_outro = client.patch(
+        f"/agen/concluir/{agendamento_id}",
+        headers={"Authorization": f"Bearer {criar_token(app, outro_id)}"},
+    )
+
+    assert resposta_cliente.status_code == 403
+    assert resposta_outro.status_code == 403
+
+
+# Teste 20 — cancelado não conclui e concluído não cancela.
+def test_estados_invalidos_de_conclusao(client, app):
+    admin_id = criar_usuario(app, "admin-estados@teste.com", role="ADMIN")
+    cliente_id = criar_usuario(app, "cliente-estados@teste.com")
+    barbeiro_id = criar_usuario(
+        app,
+        "barbeiro-estados@teste.com",
+        role="BARBEIRO",
+    )
+    servico_id = criar_servico(app)
+    passado = datetime.now().replace(second=0, microsecond=0) - timedelta(hours=2)
+    cancelado_id = criar_agendamento(
+        app, cliente_id, barbeiro_id, servico_id, passado, status="CANCELADO"
+    )
+    concluido_id = criar_agendamento(
+        app, cliente_id, barbeiro_id, servico_id,
+        passado - timedelta(hours=1), status="CONCLUIDO",
+    )
+    headers = {"Authorization": f"Bearer {criar_token(app, admin_id)}"}
+
+    assert client.patch(f"/agen/concluir/{cancelado_id}", headers=headers).status_code == 409
+    assert client.patch(f"/agen/concluir/{concluido_id}", headers=headers).status_code == 409
+    assert client.delete(f"/agen/del/{concluido_id}", headers=headers).status_code == 409
+    
+def cenario_disponibilidade(app, duracao=30):
+    cliente_id = criar_usuario(app, "cliente-disp@teste.com")
+    barbeiro_id = criar_usuario(
+        app,
+        "barbeiro-disp@teste.com",
+        role="BARBEIRO",
+    )
+    servico_id = criar_servico(app, duracao=duracao)
+    dia = data_futura()
+    criar_horario(app, barbeiro_id, dia.weekday(), inicio=time(9), fim=time(12))
+    token = criar_token(app, cliente_id)
+
+    return cliente_id, barbeiro_id, servico_id, dia, token
+
+
+def url_disponibilidade(barbeiro_id, servico_id, dia):
+    return (
+        f"/barber/{barbeiro_id}/disponibilidade"
+        f"?data={dia.strftime('%Y-%m-%d')}&servico_id={servico_id}"
+    )
+
+
+# Teste 21 — lista os horários livres do expediente.
+def test_disponibilidade_lista_horarios_livres(client, app):
+    _, barbeiro_id, servico_id, dia, token = cenario_disponibilidade(app)
+
+    resposta = client.get(
+        url_disponibilidade(barbeiro_id, servico_id, dia),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    horas = [h["inicio"][-5:] for h in resposta.get_json()["horarios"]]
+
+    assert resposta.status_code == 200
+    assert horas == ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"]
+
+
+# Teste 22 — horário confirmado some da lista; cancelado não.
+def test_disponibilidade_remove_confirmado_e_ignora_cancelado(client, app):
+    cliente_id, barbeiro_id, servico_id, dia, token = cenario_disponibilidade(app)
+    criar_agendamento(app, cliente_id, barbeiro_id, servico_id, dia.replace(hour=10))
+    criar_agendamento(
+        app, cliente_id, barbeiro_id, servico_id,
+        dia.replace(hour=11), status="CANCELADO",
+    )
+
+    resposta = client.get(
+        url_disponibilidade(barbeiro_id, servico_id, dia),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    horas = [h["inicio"][-5:] for h in resposta.get_json()["horarios"]]
+
+    assert horas == ["09:00", "09:30", "10:30", "11:00", "11:30"]
+
+
+# Teste 23 — serviço de 60 minutos só começa onde cabe inteiro.
+def test_disponibilidade_respeita_duracao_do_servico(client, app):
+    _, barbeiro_id, servico_id, dia, token = cenario_disponibilidade(app, duracao=60)
+
+    resposta = client.get(
+        url_disponibilidade(barbeiro_id, servico_id, dia),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    horas = [h["inicio"][-5:] for h in resposta.get_json()["horarios"]]
+
+    assert horas == ["09:00", "09:30", "10:00", "10:30", "11:00"]
+
+
+# Teste 24 — dia sem expediente devolve lista vazia e parâmetros faltando dão 400.
+def test_disponibilidade_dia_sem_expediente_e_parametros_invalidos(client, app):
+    _, barbeiro_id, servico_id, dia, token = cenario_disponibilidade(app)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    outro_dia = client.get(
+        url_disponibilidade(barbeiro_id, servico_id, dia + timedelta(days=1)),
+        headers=headers,
+    )
+    sem_params = client.get(f"/barber/{barbeiro_id}/disponibilidade", headers=headers)
+    barbeiro_inexistente = client.get(
+        url_disponibilidade(999, servico_id, dia), headers=headers
+    )
+
+    assert outro_dia.status_code == 200
+    assert outro_dia.get_json()["horarios"] == []
+    assert sem_params.status_code == 400
+    assert barbeiro_inexistente.status_code == 404
+
+
+# Teste 25 — um horário devolvido é aceito pelo agendamento.
+def test_horario_devolvido_e_aceito_pelo_agendamento(client, app):
+    _, barbeiro_id, servico_id, dia, token = cenario_disponibilidade(app)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    livres = client.get(
+        url_disponibilidade(barbeiro_id, servico_id, dia), headers=headers
+    ).get_json()["horarios"]
+
+    resposta = client.post(
+        "/agen/add",
+        headers=headers,
+        json={
+            "barbeiro_id": barbeiro_id,
+            "servico_id": servico_id,
+            "inicio": livres[0]["inicio"],
+        },
+    )
+
+    assert resposta.status_code == 201

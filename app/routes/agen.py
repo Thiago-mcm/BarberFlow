@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from app.models.horarios import Horario
 from app.models.service import Service
 from app.models.agendamento import Agendamento
+from app.utils.decorators import role_required
 
 agen_bp = Blueprint("agen", __name__)
 
@@ -110,28 +111,26 @@ def listar_agen():
     usuario = get_current_user()
     role = usuario.role
     usuario_id = usuario.id
-    
-    
+
+    consulta = select(Agendamento)
+
     if role == "CLIENTE":
-        consult_cl = db.session.scalars(select(Agendamento).where(Agendamento.cliente_id == usuario_id).where(Agendamento.status == "CONFIRMADO").order_by(Agendamento.inicio)).all()
-        
-        return jsonify(agendamentos=[a.to_dict() for a in consult_cl]), 200
-    
+        consulta = consulta.where(Agendamento.cliente_id == usuario_id)
     elif role == "BARBEIRO":
-        consult_bar = db.session.scalars(select(Agendamento).where(Agendamento.barbeiro_id == usuario_id).where(Agendamento.status == "CONFIRMADO").order_by(Agendamento.inicio)).all()
-     
-        return jsonify(agendamentos=[a.to_dict() for a in consult_bar]), 200
-    
-    elif role == "ADMIN":
-        agendamentos = db.session.scalars(select(Agendamento).where(Agendamento.status == "CONFIRMADO").order_by(Agendamento.inicio)).all()
+        consulta = consulta.where(Agendamento.barbeiro_id == usuario_id)
+    elif role != "ADMIN":
+        return jsonify(erro="Usuario com ROLE invalida"), 403
 
-        return jsonify(agendamentos=[a.to_dict() for a in agendamentos]), 200
+    status = (request.args.get("status") or "CONFIRMADO").strip().upper()
 
-    else:
-        return jsonify(erro="Usuario com ROLE invalida"), 403 
-    
-    
-    
+    if status in ("CONFIRMADO", "CANCELADO", "CONCLUIDO"):
+        consulta = consulta.where(Agendamento.status == status)
+    elif status != "TODOS":
+        return jsonify(erro="status deve ser CONFIRMADO, CANCELADO, CONCLUIDO ou todos"), 400
+
+    agendamentos = db.session.scalars(consulta.order_by(Agendamento.inicio)).all()
+
+    return jsonify(agendamentos=[a.to_dict() for a in agendamentos]), 200
     
 @agen_bp.route("/del/<int:id_agen>", methods=["DELETE"])
 @jwt_required()
@@ -153,6 +152,9 @@ def delete_agen(id_agen):
 
     if agendamento.status == "CANCELADO":
         return jsonify(erro="Agendamento já está cancelado"), 409
+    
+    if agendamento.status == "CONCLUIDO":
+        return jsonify(erro="Agendamento já foi concluído e não pode ser cancelado"), 409
 
     if role == "CLIENTE":
         tempo_restante = agendamento.inicio - datetime.now()
@@ -165,6 +167,37 @@ def delete_agen(id_agen):
 
     return jsonify(
         msg="Agendamento cancelado",
+        agendamento=agendamento.to_dict(),
+    ), 200
+    
+    
+@agen_bp.route("/concluir/<int:id_agen>", methods=["PATCH"])
+@role_required("BARBEIRO", "ADMIN")
+def concluir_agen(id_agen):
+    usuario = get_current_user()
+
+    agendamento = db.session.get(Agendamento, id_agen)
+
+    if not agendamento:
+        return jsonify(erro="Agendamento não encontrado"), 404
+
+    if usuario.role == "BARBEIRO" and agendamento.barbeiro_id != usuario.id:
+        return jsonify(erro="Você não pode concluir este agendamento"), 403
+
+    if agendamento.status == "CANCELADO":
+        return jsonify(erro="Agendamento cancelado não pode ser concluído"), 409
+
+    if agendamento.status == "CONCLUIDO":
+        return jsonify(erro="Agendamento já está concluído"), 409
+
+    if agendamento.inicio > datetime.now():
+        return jsonify(erro="O agendamento só pode ser concluído depois do horário de início"), 400
+
+    agendamento.status = "CONCLUIDO"
+    db.session.commit()
+
+    return jsonify(
+        msg="Agendamento concluído",
         agendamento=agendamento.to_dict(),
     ), 200
     

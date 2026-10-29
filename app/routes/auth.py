@@ -4,8 +4,10 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 from app.ext import db
 from app.models.user import User
 from app.utils.decorators import role_required
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime
+from app.models.agendamento import Agendamento
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -28,7 +30,7 @@ def register():
     if len(senha) < 8:
         return jsonify(erro="a senha deve ter pelo menos 8 caracteres"), 400
 
-    if User.query.filter_by(email=email).first():
+    if db.session.scalar(select(User).where(User.email == email)):
         return jsonify(erro="email já cadastrado"), 409
 
     user = User(
@@ -55,7 +57,7 @@ def login():
     if not email or not senha:
         return jsonify(erro="email e senha são obrigatórios"), 400
 
-    user = User.query.filter_by(email=email).first()
+    user = db.session.scalar(select(User).where(User.email == email))
 
     if not user or not check_password_hash(user.senha_hash, senha):
         return jsonify(erro="email ou senha inválidos"), 401
@@ -134,6 +136,71 @@ def update_user(id_usuario):
     return jsonify(usuario.to_dict()), 200
 
 
+
+@auth_bp.route("/users", methods=["GET"])
+@role_required("ADMIN")
+def listar_usuarios():
+    consulta = select(User).where(User.ativo.is_(True)).order_by(User.nome)
+
+    role = request.args.get("role")
+
+    if role is not None:
+        role = role.strip().upper()
+
+        if role not in ("CLIENTE", "BARBEIRO", "ADMIN"):
+            return jsonify(erro="role deve ser CLIENTE, BARBEIRO ou ADMIN"), 400
+
+        consulta = consulta.where(User.role == role)
+
+    usuarios = db.session.scalars(consulta).all()
+
+    return jsonify([u.to_dict() for u in usuarios]), 200
+
+
+
+
+@auth_bp.route("/role/<int:id_usuario>", methods=["PATCH"])
+@role_required("ADMIN")
+def alterar_role(id_usuario):
+    dados = request.get_json(silent=True)
+
+    if not isinstance(dados, dict):
+        return jsonify(erro="O corpo precisa ser um objeto JSON"), 400
+
+    role = dados.get("role")
+
+    if not isinstance(role, str) or role.strip().upper() not in ("CLIENTE", "BARBEIRO", "ADMIN"):
+        return jsonify(erro="role deve ser CLIENTE, BARBEIRO ou ADMIN"), 400
+
+    role = role.strip().upper()
+
+    usuario = db.session.get(User, id_usuario)
+
+    if not usuario or not usuario.ativo:
+        return jsonify(erro="Usuário não encontrado"), 404
+
+    if id_usuario == int(get_jwt_identity()):
+        return jsonify(erro="Você não pode alterar a própria role"), 400
+
+    if usuario.role == role:
+        return jsonify(msg="Role já era essa", usuario=usuario.to_dict()), 200
+
+    if usuario.role == "BARBEIRO":
+        pendente = db.session.scalar(
+            select(Agendamento)
+            .where(Agendamento.barbeiro_id == id_usuario)
+            .where(Agendamento.status == "CONFIRMADO")
+            .where(Agendamento.fim > datetime.now())
+        )
+
+        if pendente:
+            return jsonify(erro="O barbeiro tem agendamentos futuros; cancele-os antes de mudar a role"), 409
+
+    usuario.role = role
+    db.session.commit()
+
+    return jsonify(msg="Role alterada", usuario=usuario.to_dict()), 200
+
 @auth_bp.route("/delete/<int:id_usuario>", methods=["DELETE"])
 @role_required("ADMIN")
 def deletar_usuario(id_usuario):
@@ -150,6 +217,3 @@ def deletar_usuario(id_usuario):
     db.session.commit()
     
     return jsonify(msg="Usuario inativado", usuario=consult.to_dict()), 200
-
-    
-

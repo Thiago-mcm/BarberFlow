@@ -4,8 +4,10 @@ from app.ext import db
 from app.models.user import User
 from app.utils.decorators import role_required
 from sqlalchemy import select
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.models.horarios import Horario
+from app.models.service import Service
+from app.models.agendamento import Agendamento
 
 
 
@@ -137,6 +139,88 @@ def delete_hr(id_hr):
     db.session.commit()
 
     return jsonify(msg="Horario removido"), 200
+
+
+@barber_bp.route("/<int:id_barbeiro>/disponibilidade", methods=["GET"])
+@jwt_required()
+def disponibilidade(id_barbeiro):
+    data = request.args.get("data")
+    servico_id = request.args.get("servico_id")
+
+    if not data or not servico_id:
+        return jsonify(erro="data e servico_id são obrigatórios"), 400
+
+    try:
+        data = datetime.strptime(data, "%Y-%m-%d").date()
+        servico_id = int(servico_id)
+    except ValueError:
+        return jsonify(erro="data precisa estar no formato %Y-%m-%d e servico_id ser inteiro"), 400
+
+    agora = datetime.now()
+
+    if data < agora.date():
+        return jsonify(erro="data não pode estar no passado"), 400
+
+    barbeiro = db.session.scalar(
+        select(User)
+        .where(User.id == id_barbeiro)
+        .where(User.role == "BARBEIRO")
+        .where(User.ativo.is_(True))
+    )
+
+    if not barbeiro:
+        return jsonify(erro="Barbeiro não encontrado"), 404
+
+    servico = db.session.scalar(
+        select(Service)
+        .where(Service.id == servico_id)
+        .where(Service.ativo.is_(True))
+    )
+
+    if not servico:
+        return jsonify(erro="Servico não encontrado"), 404
+
+    expedientes = db.session.scalars(
+        select(Horario)
+        .where(Horario.barbeiro_id == id_barbeiro)
+        .where(Horario.dia_semana == data.weekday())
+        .order_by(Horario.inicio)
+    ).all()
+
+    inicio_dia = datetime.combine(data, datetime.min.time())
+
+    ocupados = db.session.scalars(
+        select(Agendamento)
+        .where(Agendamento.barbeiro_id == id_barbeiro)
+        .where(Agendamento.status == "CONFIRMADO")
+        .where(Agendamento.inicio < inicio_dia + timedelta(days=1))
+        .where(Agendamento.fim > inicio_dia)
+    ).all()
+
+    duracao = timedelta(minutes=servico.duracao)
+    passo = timedelta(minutes=30)
+    livres = []
+
+    for expediente in expedientes:
+        inicio = datetime.combine(data, expediente.inicio)
+        fim_expediente = datetime.combine(data, expediente.fim)
+
+        while inicio + duracao <= fim_expediente:
+            fim = inicio + duracao
+
+            conflito = any(o.inicio < fim and o.fim > inicio for o in ocupados)
+
+            if inicio > agora and not conflito:
+                livres.append(
+                    {
+                        "inicio": inicio.strftime("%Y-%m-%dT%H:%M"),
+                        "fim": fim.strftime("%Y-%m-%dT%H:%M"),
+                    }
+                )
+
+            inicio += passo
+
+    return jsonify(horarios=livres), 200
     
     
     
